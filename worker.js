@@ -37,14 +37,14 @@ async function handleApi(request, env, url) {
     // ---- AUTH ----
     if (path === '/api/register' && method === 'POST') {
       const { name, email, password } = await request.json();
-      if (!name || !email || !password) return json({ error: 'الاسم والبريد وكلمة المرور مطلوبة' }, 400);
-      if (!isValidEmail(email)) return json({ error: 'صيغة البريد الإلكتروني غير صحيحة' }, 400);
-      if (password.length < 6) return json({ error: 'كلمة المرور يجب أن تكون ٦ أحرف على الأقل' }, 400);
+      if (!name || !email || !password) return json({ error: 'MISSING_FIELDS' }, 400);
+      if (!isValidEmail(email)) return json({ error: 'INVALID_EMAIL' }, 400);
+      if (password.length < 6) return json({ error: 'WEAK_PASSWORD' }, 400);
       const emailNorm = email.trim().toLowerCase();
       const existing = await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(emailNorm).first();
-      if (existing) return json({ error: 'هذا البريد الإلكتروني مسجّل من قبل' }, 400);
+      if (existing) return json({ error: 'EMAIL_TAKEN' }, 400);
       const existingName = await env.DB.prepare('SELECT id FROM users WHERE name=?').bind(name).first();
-      if (existingName) return json({ error: 'هذا الاسم مستخدم من قبل، جرّب اسمًا آخر' }, 400);
+      if (existingName) return json({ error: 'NAME_TAKEN' }, 400);
       const id = 'u' + Date.now();
       const { hash, salt } = await hashPassword(password);
       await env.DB.prepare('INSERT INTO users (id, name, email, password_hash, salt, role) VALUES (?,?,?,?,?,?)')
@@ -57,13 +57,13 @@ async function handleApi(request, env, url) {
 
     if (path === '/api/login' && method === 'POST') {
       const { email, password } = await request.json();
-      if (!email || !password) return json({ error: 'البريد وكلمة المرور مطلوبان' }, 400);
+      if (!email || !password) return json({ error: 'MISSING_FIELDS' }, 400);
       const emailNorm = email.trim().toLowerCase();
       const user = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(emailNorm).first();
-      if (!user) return json({ error: 'بيانات الدخول غير صحيحة' }, 401);
+      if (!user) return json({ error: 'INVALID_CREDENTIALS' }, 401);
       const { hash } = await hashPassword(password, user.salt);
-      if (hash !== user.password_hash) return json({ error: 'بيانات الدخول غير صحيحة' }, 401);
-      if (user.blocked) return json({ error: 'هذا الحساب محظور' }, 403);
+      if (hash !== user.password_hash) return json({ error: 'INVALID_CREDENTIALS' }, 401);
+      if (user.blocked) return json({ error: 'ACCOUNT_BLOCKED' }, 403);
       const token = newToken();
       const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
       await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').bind(token, user.id, expires).run();
@@ -72,11 +72,11 @@ async function handleApi(request, env, url) {
 
     if (path === '/api/session' && method === 'POST') {
       const { token } = await request.json();
-      if (!token) return json({ error: 'no token' }, 400);
+      if (!token) return json({ error: 'NO_TOKEN' }, 400);
       const sess = await env.DB.prepare('SELECT * FROM sessions WHERE token=?').bind(token).first();
-      if (!sess || new Date(sess.expires_at) < new Date()) return json({ error: 'expired' }, 401);
+      if (!sess || new Date(sess.expires_at) < new Date()) return json({ error: 'SESSION_EXPIRED' }, 401);
       const user = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(sess.user_id).first();
-      if (!user || user.blocked) return json({ error: 'invalid' }, 401);
+      if (!user || user.blocked) return json({ error: 'SESSION_INVALID' }, 401);
       return json({ id: user.id, name: user.name, email: user.email, role: user.role });
     }
 
@@ -146,13 +146,11 @@ async function handleApi(request, env, url) {
       })));
     }
 
-    return json({ error: 'Not found' }, 404);
+    return json({ error: 'NOT_FOUND' }, 404);
   } catch (err) {
     const raw = err.message || '';
-    const friendly = /unique/i.test(raw)
-      ? 'هذه البيانات مستخدمة من قبل، جرّب قيمة أخرى'
-      : 'حدث خطأ غير متوقع، حاول مرة أخرى';
-    return json({ error: friendly }, 500);
+    const code = /unique/i.test(raw) ? 'DUPLICATE_ERROR' : 'SERVER_ERROR';
+    return json({ error: code }, 500);
   }
 }
 
