@@ -1,8 +1,14 @@
-async function hashPassword(password) {
-  const enc = new TextEncoder().encode(password);
-  const buf = await crypto.subtle.digest('SHA-256', enc);
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+async function hashPassword(password, saltHex) {
+  const enc = new TextEncoder();
+  const salt = saltHex ? hexToBytes(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, keyMaterial, 256);
+  return { hash: bytesToHex(new Uint8Array(bits)), salt: bytesToHex(salt) };
 }
+function bytesToHex(bytes) { return [...bytes].map(b => b.toString(16).padStart(2, '0')).join(''); }
+function hexToBytes(hex) { const arr = new Uint8Array(hex.length / 2); for (let i = 0; i < arr.length; i++) arr[i] = parseInt(hex.substr(i * 2, 2), 16); return arr; }
+function newToken() { return bytesToHex(crypto.getRandomValues(new Uint8Array(32))); }
+function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -21,6 +27,8 @@ function rowToProduct(r) {
   };
 }
 
+const SESSION_DAYS = 30;
+
 async function handleApi(request, env, url) {
   const path = url.pathname;
   const method = request.method;
@@ -28,25 +36,52 @@ async function handleApi(request, env, url) {
   try {
     // ---- AUTH ----
     if (path === '/api/register' && method === 'POST') {
-      const { name, password } = await request.json();
-      if (!name || !password) return json({ error: 'الاسم وكلمة المرور مطلوبان' }, 400);
-      const existing = await env.DB.prepare('SELECT id FROM users WHERE name=?').bind(name).first();
-      if (existing) return json({ error: 'هذا الاسم مستخدم من قبل' }, 400);
+      const { name, email, password } = await request.json();
+      if (!name || !email || !password) return json({ error: 'الاسم والبريد وكلمة المرور مطلوبة' }, 400);
+      if (!isValidEmail(email)) return json({ error: 'صيغة البريد الإلكتروني غير صحيحة' }, 400);
+      if (password.length < 6) return json({ error: 'كلمة المرور يجب أن تكون ٦ أحرف على الأقل' }, 400);
+      const emailNorm = email.trim().toLowerCase();
+      const existing = await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(emailNorm).first();
+      if (existing) return json({ error: 'هذا البريد الإلكتروني مسجّل من قبل' }, 400);
       const id = 'u' + Date.now();
-      const hash = await hashPassword(password);
-      await env.DB.prepare('INSERT INTO users (id, name, password_hash, role) VALUES (?,?,?,?)')
-        .bind(id, name, hash, 'user').run();
-      return json({ id, name, role: 'user', blocked: false });
+      const { hash, salt } = await hashPassword(password);
+      await env.DB.prepare('INSERT INTO users (id, name, email, password_hash, salt, role) VALUES (?,?,?,?,?,?)')
+        .bind(id, name, emailNorm, hash, salt, 'user').run();
+      const token = newToken();
+      const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
+      await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').bind(token, id, expires).run();
+      return json({ id, name, email: emailNorm, role: 'user', token });
     }
 
     if (path === '/api/login' && method === 'POST') {
-      const { name, password } = await request.json();
-      const user = await env.DB.prepare('SELECT * FROM users WHERE name=?').bind(name).first();
+      const { email, password } = await request.json();
+      if (!email || !password) return json({ error: 'البريد وكلمة المرور مطلوبان' }, 400);
+      const emailNorm = email.trim().toLowerCase();
+      const user = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(emailNorm).first();
       if (!user) return json({ error: 'بيانات الدخول غير صحيحة' }, 401);
-      const hash = await hashPassword(password);
+      const { hash } = await hashPassword(password, user.salt);
       if (hash !== user.password_hash) return json({ error: 'بيانات الدخول غير صحيحة' }, 401);
       if (user.blocked) return json({ error: 'هذا الحساب محظور' }, 403);
-      return json({ id: user.id, name: user.name, role: user.role, blocked: false });
+      const token = newToken();
+      const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
+      await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').bind(token, user.id, expires).run();
+      return json({ id: user.id, name: user.name, email: user.email, role: user.role, token });
+    }
+
+    if (path === '/api/session' && method === 'POST') {
+      const { token } = await request.json();
+      if (!token) return json({ error: 'no token' }, 400);
+      const sess = await env.DB.prepare('SELECT * FROM sessions WHERE token=?').bind(token).first();
+      if (!sess || new Date(sess.expires_at) < new Date()) return json({ error: 'expired' }, 401);
+      const user = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(sess.user_id).first();
+      if (!user || user.blocked) return json({ error: 'invalid' }, 401);
+      return json({ id: user.id, name: user.name, email: user.email, role: user.role });
+    }
+
+    if (path === '/api/logout' && method === 'POST') {
+      const { token } = await request.json();
+      if (token) await env.DB.prepare('DELETE FROM sessions WHERE token=?').bind(token).run();
+      return json({ ok: true });
     }
 
     // ---- CATEGORIES ----
