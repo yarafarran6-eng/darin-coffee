@@ -1,0 +1,12 @@
+name = "darin-coffee"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "darin-db"
+database_id = "5ae49228-cc70-4d13-9a2d-3306268d3c08"
