@@ -50,6 +50,28 @@ function placeholderImg(label, hue){
 /* ============================================================
    I18N — fixed UI strings
 ============================================================ */
+const API_ERROR_MESSAGES = {
+  MISSING_FIELDS: {ar:'يرجى تعبئة جميع الحقول المطلوبة', en:'Please fill in all required fields'},
+  INVALID_EMAIL: {ar:'صيغة البريد الإلكتروني غير صحيحة', en:'Invalid email format'},
+  WEAK_PASSWORD: {ar:'كلمة المرور يجب أن تكون ٦ أحرف على الأقل', en:'Password must be at least 6 characters'},
+  EMAIL_TAKEN: {ar:'هذا البريد الإلكتروني مسجّل من قبل', en:'This email is already registered'},
+  NAME_TAKEN: {ar:'هذا الاسم مستخدم من قبل، جرّب اسمًا آخر', en:'This name is already taken, try another one'},
+  INVALID_CREDENTIALS: {ar:'بيانات الدخول غير صحيحة', en:'Invalid credentials'},
+  ACCOUNT_BLOCKED: {ar:'هذا الحساب محظور ولا يمكنه تسجيل الدخول', en:'This account is blocked and cannot log in'},
+  NO_TOKEN: {ar:'الجلسة غير موجودة', en:'No session found'},
+  SESSION_EXPIRED: {ar:'انتهت صلاحية الجلسة، سجّل الدخول من جديد', en:'Session expired, please log in again'},
+  SESSION_INVALID: {ar:'الجلسة غير صالحة', en:'Invalid session'},
+  DUPLICATE_ERROR: {ar:'هذه البيانات مستخدمة من قبل، جرّب قيمة أخرى', en:'This data is already in use, try a different value'},
+  SERVER_ERROR: {ar:'حدث خطأ غير متوقع، حاول مرة أخرى', en:'An unexpected error occurred, please try again'},
+  NOT_FOUND: {ar:'العنصر غير موجود', en:'Not found'},
+  NETWORK_ERROR: {ar:'تعذّر الاتصال بالخادم، تأكد من اتصالك بالإنترنت', en:'Could not reach the server, check your connection'},
+};
+function apiErrorText(code){
+  const entry = API_ERROR_MESSAGES[code];
+  if(!entry) return state.lang==='ar' ? 'حدث خطأ غير متوقع' : 'An unexpected error occurred';
+  return state.lang==='ar' ? entry.ar : entry.en;
+}
+
 const I18N = {
   home:{ar:'الرئيسية',en:'Home'}, categories:{ar:'التصنيفات',en:'Categories'},
   favorites:{ar:'المفضلة',en:'Favorites'}, cart:{ar:'العربة',en:'Cart'},
@@ -1879,7 +1901,7 @@ document.addEventListener('click', async (e)=>{
       const u = document.getElementById('lg-user').value.trim();
       const p = document.getElementById('lg-pass').value;
       let found=null;
-      let errMsg = state.lang==='ar'?'بيانات الدخول غير صحيحة':'Invalid credentials';
+      let errMsg = apiErrorText('INVALID_CREDENTIALS');
       if(u===DB.devAccount.username && p===DB.devAccount.password){
         found={id:'dev', name:t('developer'), role:'developer'};
       } else {
@@ -1894,10 +1916,10 @@ document.addEventListener('click', async (e)=>{
               localStorage.setItem('darin_session_token', data.token);
               if(!DB.demoUsers.some(x=>x.id===data.id)) DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
             } else {
-              errMsg = data.error || errMsg;
+              errMsg = apiErrorText(data.error);
             }
           }catch(e){
-            errMsg = state.lang==='ar'?'تعذّر الاتصال بالخادم، تأكد من اتصالك بالإنترنت':'Could not reach the server, check your connection';
+            errMsg = apiErrorText('NETWORK_ERROR');
           }
         }
       }
@@ -1914,18 +1936,18 @@ document.addEventListener('click', async (e)=>{
       const name = document.getElementById('su-name').value.trim();
       const email = document.getElementById('su-email').value.trim();
       const pass = document.getElementById('su-pass').value;
-      if(!name || !email || !pass){ state.loginError = state.lang==='ar'?'أدخل الاسم والبريد وكلمة المرور':'Enter name, email and password'; render(); break; }
+      if(!name || !email || !pass){ state.loginError = apiErrorText('MISSING_FIELDS'); render(); break; }
       try{
         const res = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, email, password:pass})});
         const data = await res.json();
-        if(!res.ok){ state.loginError = data.error || (state.lang==='ar'?'تعذّر إنشاء الحساب':'Could not create account'); render(); break; }
+        if(!res.ok){ state.loginError = apiErrorText(data.error); render(); break; }
         localStorage.setItem('darin_session_token', data.token);
         DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
         state.currentUser={id:data.id, name:data.name, email:data.email, role:'user'}; state.entered=true; state.page='home'; state.loginError='';
         audit((state.lang==='ar'?'عضو جديد سجّل: ':'New member signed up: ')+name);
         render(); showToast(state.lang==='ar'?'تم إنشاء الحساب':'Account created');
       }catch(e){
-        state.loginError = state.lang==='ar'?'تعذّر الاتصال بالخادم، تأكد من اتصالك بالإنترنت':'Could not reach the server, check your connection';
+        state.loginError = apiErrorText('NETWORK_ERROR');
         render();
       }
       break;
