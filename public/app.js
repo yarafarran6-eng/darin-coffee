@@ -1095,15 +1095,16 @@ function pageLogin(){
   if(state.loginTab==='signup'){
     body = `
       <div class="field"><label>${state.lang==='ar'?'الاسم':'Name'}</label><input id="su-name" type="text" placeholder="${state.lang==='ar'?'اسمك':'Your name'}"></div>
+      <div class="field"><label>${state.lang==='ar'?'البريد الإلكتروني':'Email'}</label><input id="su-email" type="email" placeholder="you@example.com"></div>
       ${passwordField('su-pass')}
       <button type="button" class="btn btn-primary" style="width:100%;" data-action="signup-submit">${icon('user',16)} ${state.lang==='ar'?'إنشاء حساب عضو':'Create member account'}</button>
       <div class="hint-box">${state.lang==='ar'?'حسابات الأعضاء فقط تُنشأ من هنا. حسابات الأدمن يُنشئها المطور، وحساب المطور ثابت.':'Only member accounts are created here. Admin accounts are created by the developer; the developer account is fixed.'}</div>`;
   } else {
     body = `
-      <div class="field"><label>${state.lang==='ar'?'الاسم أو اسم المستخدم':'Name or username'}</label><input id="lg-user" type="text" placeholder="${state.lang==='ar'?'اسم المستخدم':'Username'}"></div>
+      <div class="field"><label>${state.lang==='ar'?'البريد الإلكتروني':'Email'}</label><input id="lg-user" type="email" placeholder="you@example.com"></div>
       ${passwordField('lg-pass')}
       <button type="button" class="btn btn-primary" style="width:100%;" data-action="login-submit">${icon('key',16)} ${t('login')}</button>
-      <div class="hint-box">${state.lang==='ar'?'النظام يتعرّف على نوع الحساب تلقائيًا من البيانات.':'The system detects the account type automatically.'}</div>`;
+      <div class="hint-box">${state.lang==='ar'?'حسابات الأدمن والمطور تسجّل الدخول باسم المستخدم كالمعتاد. الأعضاء يسجّلون بالبريد الإلكتروني.':'Admin and developer accounts still log in with their username as usual. Members log in with their email.'}</div>`;
   }
 
   return `
@@ -1855,9 +1856,12 @@ document.addEventListener('click', async (e)=>{
     case 'goto-search': state.page='home'; render(); document.querySelector('.search-bar input')?.focus(); break;
     case 'goto-notif': openNotificationsModal(); break;
     case 'goto-login': state.page='login'; state.loginError=''; render(); break;
-    case 'do-logout':
+    case 'do-logout': {
+      const tok = localStorage.getItem('darin_session_token');
+      if(tok){ localStorage.removeItem('darin_session_token'); fetch('/api/logout', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:tok})}).catch(()=>{}); }
       state.currentUser={id:'guest',name:I18N.guest.ar,role:'guest'};
       state.entered=false; state.page='login'; state.loginError=''; render(); break;
+    }
     case 'set-login-tab': state.loginTab=t_.dataset.tab; state.loginError=''; render(); break;
     case 'continue-guest':
       state.currentUser={id:'guest',name:I18N.guest.ar,role:'guest'};
@@ -1874,7 +1878,8 @@ document.addEventListener('click', async (e)=>{
     case 'login-submit': {
       const u = document.getElementById('lg-user').value.trim();
       const p = document.getElementById('lg-pass').value;
-      let found=null, blockedHit=false;
+      let found=null;
+      let errMsg = state.lang==='ar'?'بيانات الدخول غير صحيحة':'Invalid credentials';
       if(u===DB.devAccount.username && p===DB.devAccount.password){
         found={id:'dev', name:t('developer'), role:'developer'};
       } else {
@@ -1882,53 +1887,46 @@ document.addEventListener('click', async (e)=>{
         if(acc) found={id:acc.id, name:acc.username, role:'admin'};
         else {
           try{
-            const res = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name:u, password:p})});
+            const res = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:u, password:p})});
             const data = await res.json();
-            if(res.ok) found = {id:data.id, name:data.name, role:data.role};
-            else if(res.status===403) blockedHit = true;
-          }catch(e){
-            const du = DB.demoUsers.find(x=>x.name===u && x.password===p);
-            if(du){
-              if(du.blocked) blockedHit=true;
-              else found={id:du.id, name:du.name, role:'user'};
+            if(res.ok){
+              found = {id:data.id, name:data.name, email:data.email, role:data.role};
+              localStorage.setItem('darin_session_token', data.token);
+              if(!DB.demoUsers.some(x=>x.id===data.id)) DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
+            } else {
+              errMsg = data.error || errMsg;
             }
+          }catch(e){
+            errMsg = state.lang==='ar'?'تعذّر الاتصال بالخادم، تأكد من اتصالك بالإنترنت':'Could not reach the server, check your connection';
           }
         }
       }
       if(found){
         state.currentUser=found; state.entered=true; state.page='home'; state.loginError='';
         render(); showToast(`${state.lang==='ar'?'تم تسجيل الدخول كـ':'Logged in as'} ${found.name}`);
-      } else if(blockedHit){
-        state.loginError = state.lang==='ar'?'هذا الحساب محظور ولا يمكنه تسجيل الدخول':'This account is blocked and cannot log in';
-        render();
       } else {
-        state.loginError = state.lang==='ar'?'بيانات الدخول غير صحيحة':'Invalid credentials';
+        state.loginError = errMsg;
         render();
       }
       break;
     }
     case 'signup-submit': {
       const name = document.getElementById('su-name').value.trim();
+      const email = document.getElementById('su-email').value.trim();
       const pass = document.getElementById('su-pass').value;
-      if(!name || !pass){ state.loginError = state.lang==='ar'?'أدخل الاسم وكلمة المرور':'Enter name and password'; render(); break; }
-      if(DB.demoUsers.some(x=>x.name===name) || name===DB.devAccount.username || DB.accounts.some(a=>a.username===name)){
-        state.loginError = state.lang==='ar'?'هذا الاسم مستخدم بالفعل':'This name is already taken'; render(); break;
-      }
+      if(!name || !email || !pass){ state.loginError = state.lang==='ar'?'أدخل الاسم والبريد وكلمة المرور':'Enter name, email and password'; render(); break; }
       try{
-        const res = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, password:pass})});
+        const res = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, email, password:pass})});
         const data = await res.json();
         if(!res.ok){ state.loginError = data.error || (state.lang==='ar'?'تعذّر إنشاء الحساب':'Could not create account'); render(); break; }
-        const nu = {id:data.id, name:data.name, password:pass, warnings:0, mute:null, blocked:false};
-        DB.demoUsers.push(nu);
-        state.currentUser={id:nu.id, name:nu.name, role:'user'}; state.entered=true; state.page='home'; state.loginError='';
+        localStorage.setItem('darin_session_token', data.token);
+        DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
+        state.currentUser={id:data.id, name:data.name, email:data.email, role:'user'}; state.entered=true; state.page='home'; state.loginError='';
         audit((state.lang==='ar'?'عضو جديد سجّل: ':'New member signed up: ')+name);
         render(); showToast(state.lang==='ar'?'تم إنشاء الحساب':'Account created');
       }catch(e){
-        const nu = {id:'u'+Date.now(), name, password:pass, warnings:0, mute:null, blocked:false};
-        DB.demoUsers.push(nu);
-        state.currentUser={id:nu.id, name:nu.name, role:'user'}; state.entered=true; state.page='home'; state.loginError='';
-        audit((state.lang==='ar'?'عضو جديد سجّل (محليًا): ':'New member signed up (local): ')+name);
-        render(); showToast(state.lang==='ar'?'تم إنشاء الحساب':'Account created');
+        state.loginError = state.lang==='ar'?'تعذّر الاتصال بالخادم، تأكد من اتصالك بالإنترنت':'Could not reach the server, check your connection';
+        render();
       }
       break;
     }
@@ -2550,6 +2548,21 @@ async function bootstrapFromApi(){
     }
   }catch(e){
     // API unreachable (offline/dev preview) — fall back to the built-in demo products silently
+  }
+
+  const token = localStorage.getItem('darin_session_token');
+  if(token){
+    try{
+      const res = await fetch('/api/session', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token})});
+      const data = await res.json();
+      if(res.ok){
+        state.currentUser = {id:data.id, name:data.name, email:data.email, role:data.role};
+        state.entered = true; state.page = 'home';
+        if(!DB.demoUsers.some(x=>x.id===data.id)) DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
+      } else {
+        localStorage.removeItem('darin_session_token');
+      }
+    }catch(e){}
   }
   render();
 }
