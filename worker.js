@@ -43,6 +43,8 @@ async function handleApi(request, env, url) {
       const emailNorm = email.trim().toLowerCase();
       const existing = await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(emailNorm).first();
       if (existing) return json({ error: 'هذا البريد الإلكتروني مسجّل من قبل' }, 400);
+      const existingName = await env.DB.prepare('SELECT id FROM users WHERE name=?').bind(name).first();
+      if (existingName) return json({ error: 'هذا الاسم مستخدم من قبل، جرّب اسمًا آخر' }, 400);
       const id = 'u' + Date.now();
       const { hash, salt } = await hashPassword(password);
       await env.DB.prepare('INSERT INTO users (id, name, email, password_hash, salt, role) VALUES (?,?,?,?,?,?)')
@@ -146,7 +148,11 @@ async function handleApi(request, env, url) {
 
     return json({ error: 'Not found' }, 404);
   } catch (err) {
-    return json({ error: err.message }, 500);
+    const raw = err.message || '';
+    const friendly = /unique/i.test(raw)
+      ? 'هذه البيانات مستخدمة من قبل، جرّب قيمة أخرى'
+      : 'حدث خطأ غير متوقع، حاول مرة أخرى';
+    return json({ error: friendly }, 500);
   }
 }
 
