@@ -51,8 +51,6 @@ function placeholderImg(label, hue){
    I18N — fixed UI strings
 ============================================================ */
 const API_ERROR_MESSAGES = {
-  EMAIL_NOT_VERIFIED: {ar:'حسابك غير مفعّل بعد — أرسلنا لك رمز تحقق جديد للبريد', en:'Your account is not verified yet — a new code was sent to your email'},
-  INVALID_CODE: {ar:'الرمز غير صحيح أو منتهي الصلاحية', en:'The code is invalid or has expired'},
   MISSING_FIELDS: {ar:'يرجى تعبئة جميع الحقول المطلوبة', en:'Please fill in all required fields'},
   INVALID_EMAIL: {ar:'صيغة البريد الإلكتروني غير صحيحة', en:'Invalid email format'},
   WEAK_PASSWORD: {ar:'كلمة المرور يجب أن تكون ٦ أحرف على الأقل', en:'Password must be at least 6 characters'},
@@ -225,7 +223,7 @@ const state = {
   page:'login', entered:false, productId:null, lang:'ar', sidebarOpen:false,
   category:'all', search:'', branchSearch:'',
   currentUser:{id:'guest', name: I18N.guest.ar, role:'guest'},
-  toast:null, loginTab:'login', loginError:'', pendingVerifyEmail:null,
+  toast:null, loginTab:'login', loginError:'',
 };
 
 const BRAND_SWATCHES = ['#0e0d0c','#f1ece4','#7a7167','#c2774c','#cda434','#5fae6e','#d9645a','#5a8fd9','#8b5cf6','#2a9d8f','#ec4899','#d946ef','#8b5e34','#e8dcc8','#1e3a5f'];
@@ -459,11 +457,9 @@ function renderPage(){
     case 'panel-categories': return pageCategoriesAdmin();
     case 'panel-slides': return pageSlidesAdmin();
     case 'panel-sidebar': return pageSidebarAdmin();
-    case 'panel-audit': return pageAudit();
     case 'panel-add-product': return pageAddProduct();
     case 'panel-admin-feedback': return pageAdminFeedback();
     case 'panel-site-settings': return pageSiteSettings();
-    case 'panel-code': return pageCodeEditor();
     default: return pageHome();
   }
 }
@@ -1109,19 +1105,6 @@ function pageLogin(){
       <button class="btn btn-danger" data-action="do-logout">${icon('logout',16)} ${t('logout')}</button>
     </div>`;
   }
-  if(state.pendingVerifyEmail){
-    return `<h1 class="page-title">${state.lang==='ar'?'تفعيل الحساب':'Verify your account'}</h1>
-    ${state.loginError?`<div class="error-box">${state.loginError}</div>`:''}
-    <div class="card">
-      <p style="margin-bottom:14px; color:var(--dim);">${state.lang==='ar'?'أرسلنا رمز تحقق مكوّن من ٦ أرقام إلى':'We sent a 6-digit verification code to'} <strong>${state.pendingVerifyEmail}</strong></p>
-      <div class="field"><label>${state.lang==='ar'?'رمز التحقق':'Verification code'}</label><input id="verify-code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:6px; font-size:20px; text-align:center;"></div>
-      <button type="button" class="btn btn-primary" style="width:100%;" data-action="verify-email-submit">${icon('check',16)} ${state.lang==='ar'?'تأكيد الرمز':'Confirm code'}</button>
-      <div style="display:flex; justify-content:space-between; margin-top:12px;">
-        <button type="button" class="btn btn-sm" data-action="resend-code-submit">${state.lang==='ar'?'إعادة إرسال الرمز':'Resend code'}</button>
-        <button type="button" class="btn btn-sm" data-action="cancel-verify">${state.lang==='ar'?'رجوع':'Back'}</button>
-      </div>
-    </div>`;
-  }
   const tabs = [
     {key:'login', label: state.lang==='ar'?'تسجيل الدخول':'Sign in'},
     {key:'signup', label: state.lang==='ar'?'إنشاء حساب':'Create account'},
@@ -1309,14 +1292,6 @@ function pageSidebarAdmin(){
   <div class="card" style="overflow-x:auto;">
     <table><thead><tr><th>${state.lang==='ar'?'العنصر':'Item'}</th><th>${t('admin')}</th><th>${t('member')}</th></tr></thead><tbody>${rows}</tbody></table>
   </div>`;
-}
-
-/* ============================================================
-   PANEL: AUDIT LOG
-============================================================ */
-function pageAudit(){
-  return `<h1 class="page-title">${t('audit')}</h1>
-  <div class="card">${DB.audit.map(a=>`<div class="audit-item"><div class="t">${a.ts}</div><div>${a.text}</div></div>`).join('')}</div>`;
 }
 
 /* ============================================================
@@ -1646,63 +1621,9 @@ function pageAddProduct(){
 }
 
 /* ============================================================
-   PANEL: CODE EDITOR
-============================================================ */
-const CODE_SAMPLES = {
-  html: `<!-- مثال: قسم البطاقة الترويجية -->
-<section class="hero-banner">
-  <h1>قهوة طازجة كل أسبوع</h1>
-  <p>تحميص محلي بكميات صغيرة</p>
-  <button class="cta">تصفح الآن</button>
-</section>`,
-  css: `:root{
-  --accent: ${getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#c2774c'};
-  --gold: ${getComputedStyle(document.documentElement).getPropertyValue('--gold') || '#cda434'};
-}
-.cta{
-  background: var(--accent);
-  color: #1b120a;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-weight: 700;
-}`,
-  js: `// مثال: مدة عرض شرائح الصفحة الرئيسية (بالمللي ثانية)
-const SLIDE_INTERVAL = 5000;
-
-document.querySelectorAll('.cta').forEach(btn=>{
-  btn.addEventListener('click', ()=> alert('مرحبًا بك في دارين!'));
-});`
-};
-let codeState = {tab:'html', edited:{html:CODE_SAMPLES.html, css:CODE_SAMPLES.css, js:CODE_SAMPLES.js}};
-
-function pageCodeEditor(){
-  const tabs = ['html','css','js'].map(k=>`<div class="tab ${codeState.tab===k?'active':''}" data-action="code-tab" data-tab="${k}">${k.toUpperCase()}</div>`).join('');
-  const code = codeState.edited[codeState.tab];
-  const lines = code.split('\\n').map((_,i)=>i+1).join('\\n');
-  return `<h1 class="page-title">${t('code_editor')}</h1>
-  <div class="warn-box">${icon('warn',18)} <div>${state.lang==='ar'
-    ?'تحذير: التعديل المباشر على الكود قد يكسر الموقع بالكامل لجميع الزوار. استخدم زر "تجربة" لمعاينة النتيجة في بيئة منفصلة قبل أي تطبيق نهائي، ويمكنك التراجع في أي وقت.'
-    :'Warning: editing code directly can break the live site for everyone. Use "Test" to preview changes in a sandbox before applying, and you can revert anytime.'}</div></div>
-  <div class="tabs">${tabs}</div>
-  <div class="editor-toolbar"><span>${codeState.tab}.${codeState.tab==='js'?'js':codeState.tab}</span><span>${state.lang==='ar'?'وضع القراءة/الكتابة':'read/write'}</span></div>
-  <div class="editor-wrap">
-    <div class="editor-gutter">${lines}</div>
-    <textarea class="editor-area" id="code-area" spellcheck="false">${escapeHtml(code)}</textarea>
-  </div>
-  <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
-    <button class="btn" data-action="code-test">${icon('check',14)} ${state.lang==='ar'?'تجربة':'Test'}</button>
-    ${codeState.tab==='css'
-      ? `<button class="btn btn-primary" data-action="code-apply">${icon('check',14)} ${state.lang==='ar'?'تطبيق على الموقع':'Apply to site'}</button>`
-      : `<button class="btn" disabled style="opacity:.5; cursor:not-allowed;" title="${state.lang==='ar'?'التطبيق المباشر متاح حاليًا لـ CSS فقط':'Live apply is currently CSS only'}">${icon('check',14)} ${state.lang==='ar'?'التطبيق المباشر غير متاح لهذا التبويب':'Live apply not available for this tab'}</button>`}
-    <button class="btn btn-danger" data-action="code-cancel">${icon('x',14)} ${state.lang==='ar'?'تراجع عن كل التغييرات':'Revert all changes'}</button>
-  </div>
-  <iframe class="preview-frame" id="code-preview" style="display:none;"></iframe>`;
-}
-function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-/* ============================================================
    GENERIC IMAGE UPLOAD (product images, logo, section backgrounds)
 ============================================================ */
+function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function handleFileUpload(inputEl, previewImgId, onLoaded){
   const file = inputEl.files && inputEl.files[0];
   if(!file) return;
@@ -1930,10 +1851,6 @@ document.addEventListener('click', async (e)=>{
               found = {id:data.id, name:data.name, email:data.email, role:data.role};
               localStorage.setItem('darin_session_token', data.token);
               if(!DB.demoUsers.some(x=>x.id===data.id)) DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
-            } else if(data.error==='EMAIL_NOT_VERIFIED'){
-              state.pendingVerifyEmail = data.email || u;
-              state.loginError = apiErrorText('EMAIL_NOT_VERIFIED');
-              render(); break;
             } else {
               errMsg = apiErrorText(data.error);
             }
@@ -1960,47 +1877,17 @@ document.addEventListener('click', async (e)=>{
         const res = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, email, password:pass})});
         const data = await res.json();
         if(!res.ok){ state.loginError = apiErrorText(data.error); render(); break; }
-        state.pendingVerifyEmail = data.email;
-        state.loginError = '';
-        render(); showToast(state.lang==='ar'?'تم إرسال رمز التحقق لبريدك':'Verification code sent to your email');
-      }catch(e){
-        state.loginError = apiErrorText('NETWORK_ERROR');
-        render();
-      }
-      break;
-    }
-    case 'verify-email-submit': {
-      const code = document.getElementById('verify-code').value.trim();
-      if(!code){ state.loginError = state.lang==='ar'?'أدخل رمز التحقق':'Enter the verification code'; render(); break; }
-      try{
-        const res = await fetch('/api/verify-email', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:state.pendingVerifyEmail, code})});
-        const data = await res.json();
-        if(!res.ok){ state.loginError = apiErrorText(data.error); render(); break; }
         localStorage.setItem('darin_session_token', data.token);
         DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
-        state.currentUser={id:data.id, name:data.name, email:data.email, role:'user'}; state.entered=true; state.page='home'; state.loginError=''; state.pendingVerifyEmail=null;
-        audit((state.lang==='ar'?'عضو جديد سجّل: ':'New member signed up: ')+data.name);
-        render(); showToast(state.lang==='ar'?'تم تفعيل الحساب بنجاح':'Account verified successfully');
+        state.currentUser={id:data.id, name:data.name, email:data.email, role:'user'}; state.entered=true; state.page='home'; state.loginError='';
+        audit((state.lang==='ar'?'عضو جديد سجّل: ':'New member signed up: ')+name);
+        render(); showToast(state.lang==='ar'?'تم إنشاء الحساب':'Account created');
       }catch(e){
         state.loginError = apiErrorText('NETWORK_ERROR');
         render();
       }
       break;
     }
-    case 'resend-code-submit': {
-      try{
-        const res = await fetch('/api/resend-code', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:state.pendingVerifyEmail})});
-        const data = await res.json();
-        if(!res.ok){ state.loginError = apiErrorText(data.error); render(); break; }
-        showToast(state.lang==='ar'?'تم إرسال رمز جديد':'A new code was sent');
-      }catch(e){
-        state.loginError = apiErrorText('NETWORK_ERROR'); render();
-      }
-      break;
-    }
-    case 'cancel-verify':
-      state.pendingVerifyEmail = null; state.loginError=''; render(); break;
-
 
     case 'toggle-fav': {
       const list = getFav(); const id=t_.dataset.id;
@@ -2445,44 +2332,6 @@ document.addEventListener('click', async (e)=>{
     }
     case 'section-delete': DB.homeSections.splice(parseInt(t_.dataset.i),1); closeModal(); render(); showToast(state.lang==='ar'?'تم حذف القسم':'Section deleted'); break;
 
-    /* code editor */
-    case 'code-tab':
-      codeState.edited[codeState.tab] = document.getElementById('code-area').value;
-      codeState.tab = t_.dataset.tab; render(); break;
-    case 'code-test': {
-      codeState.edited[codeState.tab] = document.getElementById('code-area').value;
-      const frame = document.getElementById('code-preview');
-      frame.style.display='block';
-      const doc = `<html><head><style>body{font-family:Tajawal,sans-serif; padding:16px; background:#0e0d0c; color:#f1ece4;} ${codeState.edited.css}</style></head><body>${codeState.edited.html}` + '<scr'+'ipt>' + codeState.edited.js + '<\/scr'+'ipt>' + `</body></html>`;
-      frame.srcdoc = doc;
-      break;
-    }
-    case 'code-apply': {
-      codeState.edited[codeState.tab] = document.getElementById('code-area').value;
-      openModal(`
-        <div class="modal-head"><h3>${state.lang==='ar'?'تأكيد التطبيق':'Confirm apply'}</h3><button class="iconbtn" data-action="close-modal">${icon('close')}</button></div>
-        <div class="modal-body">
-          <div class="warn-box">${icon('warn',18)} <div>${state.lang==='ar'?'سيتم تطبيق متغيرات CSS الجديدة (مثل ألوان الموقع) على الواجهة الحالية مباشرة. تأكد أنك جربتها أولًا.':'New CSS variables (e.g. site colors) will be applied to the live interface. Make sure you tested first.'}</div></div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn" data-action="close-modal">${t('cancel')}</button>
-          <button class="btn btn-primary" data-action="confirm-code-apply">${state.lang==='ar'?'تطبيق':'Apply'}</button>
-        </div>`);
-      break;
-    }
-    case 'confirm-code-apply': {
-      const css = codeState.edited.css;
-      const matches = [...css.matchAll(/--(accent|gold|green|red|blue|bg|surface|surface2):\\s*([^;]+);/g)];
-      let applied=0;
-      matches.forEach(m=>{ document.documentElement.style.setProperty('--'+m[1], m[2].trim()); applied++; });
-      audit((state.lang==='ar'?'تم تطبيق تعديلات CSS ('+applied+' متغيرات)':'Applied CSS changes ('+applied+' variables)'));
-      closeModal(); render(); showToast(state.lang==='ar'?'تم تطبيق التعديلات':'Changes applied'); break;
-    }
-    case 'code-cancel': {
-      codeState.edited = {html:CODE_SAMPLES.html, css:CODE_SAMPLES.css, js:CODE_SAMPLES.js};
-      document.documentElement.removeAttribute('style');
-      render(); showToast(state.lang==='ar'?'تم التراجع':'Reverted'); break;
-    }
   }
 });
 
