@@ -9,27 +9,6 @@ function bytesToHex(bytes) { return [...bytes].map(b => b.toString(16).padStart(
 function hexToBytes(hex) { const arr = new Uint8Array(hex.length / 2); for (let i = 0; i < arr.length; i++) arr[i] = parseInt(hex.substr(i * 2, 2), 16); return arr; }
 function newToken() { return bytesToHex(crypto.getRandomValues(new Uint8Array(32))); }
 function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
-function genCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
-
-async function sendVerificationEmail(env, email, code) {
-  if (!env.RESEND_API_KEY) return { ok: false, skipped: true };
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: 'Darin <onboarding@resend.dev>',
-      to: [email],
-      subject: 'رمز التحقق من حسابك في دارين',
-      html: `<div dir="rtl" style="font-family:Tahoma,Arial,sans-serif; max-width:420px; margin:auto; padding:20px; background:#171512; color:#f1ece4; border-radius:12px;">
-        <h2 style="margin-bottom:4px;">مرحبًا بك في دارين</h2>
-        <p style="color:#a89e92;">استخدم الرمز التالي لتفعيل حسابك:</p>
-        <div style="font-size:32px; font-weight:800; letter-spacing:8px; background:#201d19; padding:16px; border-radius:8px; text-align:center; color:#cda434;">${code}</div>
-        <p style="color:#7a7167; font-size:12px; margin-top:16px;">هذا الرمز صالح لمدة ١٠ دقائق. إذا لم تطلب هذا الرمز تجاهل هذه الرسالة.</p>
-      </div>`
-    })
-  });
-  return { ok: res.ok };
-}
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -62,51 +41,18 @@ async function handleApi(request, env, url) {
       if (!isValidEmail(email)) return json({ error: 'INVALID_EMAIL' }, 400);
       if (password.length < 6) return json({ error: 'WEAK_PASSWORD' }, 400);
       const emailNorm = email.trim().toLowerCase();
-      const existing = await env.DB.prepare('SELECT id, verified FROM users WHERE email=?').bind(emailNorm).first();
-      if (existing && existing.verified) return json({ error: 'EMAIL_TAKEN' }, 400);
-      if (!existing) {
-        const existingName = await env.DB.prepare('SELECT id FROM users WHERE name=?').bind(name).first();
-        if (existingName) return json({ error: 'NAME_TAKEN' }, 400);
-        const id = 'u' + Date.now();
-        const { hash, salt } = await hashPassword(password);
-        await env.DB.prepare('INSERT INTO users (id, name, email, password_hash, salt, role, verified) VALUES (?,?,?,?,?,?,0)')
-          .bind(id, name, emailNorm, hash, salt, 'user').run();
-      }
-      const code = genCode();
-      const expires = new Date(Date.now() + 10 * 60000).toISOString();
-      await env.DB.prepare('INSERT INTO verification_codes (email, code, expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code=excluded.code, expires_at=excluded.expires_at')
-        .bind(emailNorm, code, expires).run();
-      const sent = await sendVerificationEmail(env, emailNorm, code);
-      return json({ requiresVerification: true, email: emailNorm, emailSent: sent.ok });
-    }
-
-    if (path === '/api/verify-email' && method === 'POST') {
-      const { email, code } = await request.json();
-      if (!email || !code) return json({ error: 'MISSING_FIELDS' }, 400);
-      const emailNorm = email.trim().toLowerCase();
-      const rec = await env.DB.prepare('SELECT * FROM verification_codes WHERE email=?').bind(emailNorm).first();
-      if (!rec || rec.code !== String(code) || new Date(rec.expires_at) < new Date()) return json({ error: 'INVALID_CODE' }, 400);
-      await env.DB.prepare('UPDATE users SET verified=1 WHERE email=?').bind(emailNorm).run();
-      await env.DB.prepare('DELETE FROM verification_codes WHERE email=?').bind(emailNorm).run();
-      const user = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(emailNorm).first();
+      const existing = await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(emailNorm).first();
+      if (existing) return json({ error: 'EMAIL_TAKEN' }, 400);
+      const existingName = await env.DB.prepare('SELECT id FROM users WHERE name=?').bind(name).first();
+      if (existingName) return json({ error: 'NAME_TAKEN' }, 400);
+      const id = 'u' + Date.now();
+      const { hash, salt } = await hashPassword(password);
+      await env.DB.prepare('INSERT INTO users (id, name, email, password_hash, salt, role, verified) VALUES (?,?,?,?,?,?,1)')
+        .bind(id, name, emailNorm, hash, salt, 'user').run();
       const token = newToken();
       const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
-      await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').bind(token, user.id, expires).run();
-      return json({ id: user.id, name: user.name, email: user.email, role: user.role, token });
-    }
-
-    if (path === '/api/resend-code' && method === 'POST') {
-      const { email } = await request.json();
-      if (!email) return json({ error: 'MISSING_FIELDS' }, 400);
-      const emailNorm = email.trim().toLowerCase();
-      const user = await env.DB.prepare('SELECT id FROM users WHERE email=?').bind(emailNorm).first();
-      if (!user) return json({ error: 'INVALID_CREDENTIALS' }, 400);
-      const code = genCode();
-      const expires = new Date(Date.now() + 10 * 60000).toISOString();
-      await env.DB.prepare('INSERT INTO verification_codes (email, code, expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code=excluded.code, expires_at=excluded.expires_at')
-        .bind(emailNorm, code, expires).run();
-      const sent = await sendVerificationEmail(env, emailNorm, code);
-      return json({ ok: true, emailSent: sent.ok });
+      await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').bind(token, id, expires).run();
+      return json({ id, name, email: emailNorm, role: 'user', token });
     }
 
     if (path === '/api/login' && method === 'POST') {
@@ -118,14 +64,6 @@ async function handleApi(request, env, url) {
       const { hash } = await hashPassword(password, user.salt);
       if (hash !== user.password_hash) return json({ error: 'INVALID_CREDENTIALS' }, 401);
       if (user.blocked) return json({ error: 'ACCOUNT_BLOCKED' }, 403);
-      if (!user.verified) {
-        const code = genCode();
-        const expires = new Date(Date.now() + 10 * 60000).toISOString();
-        await env.DB.prepare('INSERT INTO verification_codes (email, code, expires_at) VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET code=excluded.code, expires_at=excluded.expires_at')
-          .bind(emailNorm, code, expires).run();
-        await sendVerificationEmail(env, emailNorm, code);
-        return json({ error: 'EMAIL_NOT_VERIFIED', email: emailNorm }, 403);
-      }
       const token = newToken();
       const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
       await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').bind(token, user.id, expires).run();
