@@ -51,6 +51,8 @@ function placeholderImg(label, hue){
    I18N — fixed UI strings
 ============================================================ */
 const API_ERROR_MESSAGES = {
+  EMAIL_NOT_VERIFIED: {ar:'حسابك غير مفعّل بعد — أرسلنا لك رمز تحقق جديد للبريد', en:'Your account is not verified yet — a new code was sent to your email'},
+  INVALID_CODE: {ar:'الرمز غير صحيح أو منتهي الصلاحية', en:'The code is invalid or has expired'},
   MISSING_FIELDS: {ar:'يرجى تعبئة جميع الحقول المطلوبة', en:'Please fill in all required fields'},
   INVALID_EMAIL: {ar:'صيغة البريد الإلكتروني غير صحيحة', en:'Invalid email format'},
   WEAK_PASSWORD: {ar:'كلمة المرور يجب أن تكون ٦ أحرف على الأقل', en:'Password must be at least 6 characters'},
@@ -223,7 +225,7 @@ const state = {
   page:'login', entered:false, productId:null, lang:'ar', sidebarOpen:false,
   category:'all', search:'', branchSearch:'',
   currentUser:{id:'guest', name: I18N.guest.ar, role:'guest'},
-  toast:null, loginTab:'login', loginError:'',
+  toast:null, loginTab:'login', loginError:'', pendingVerifyEmail:null,
 };
 
 const BRAND_SWATCHES = ['#0e0d0c','#f1ece4','#7a7167','#c2774c','#cda434','#5fae6e','#d9645a','#5a8fd9','#8b5cf6','#2a9d8f','#ec4899','#d946ef','#8b5e34','#e8dcc8','#1e3a5f'];
@@ -1107,6 +1109,19 @@ function pageLogin(){
       <button class="btn btn-danger" data-action="do-logout">${icon('logout',16)} ${t('logout')}</button>
     </div>`;
   }
+  if(state.pendingVerifyEmail){
+    return `<h1 class="page-title">${state.lang==='ar'?'تفعيل الحساب':'Verify your account'}</h1>
+    ${state.loginError?`<div class="error-box">${state.loginError}</div>`:''}
+    <div class="card">
+      <p style="margin-bottom:14px; color:var(--dim);">${state.lang==='ar'?'أرسلنا رمز تحقق مكوّن من ٦ أرقام إلى':'We sent a 6-digit verification code to'} <strong>${state.pendingVerifyEmail}</strong></p>
+      <div class="field"><label>${state.lang==='ar'?'رمز التحقق':'Verification code'}</label><input id="verify-code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:6px; font-size:20px; text-align:center;"></div>
+      <button type="button" class="btn btn-primary" style="width:100%;" data-action="verify-email-submit">${icon('check',16)} ${state.lang==='ar'?'تأكيد الرمز':'Confirm code'}</button>
+      <div style="display:flex; justify-content:space-between; margin-top:12px;">
+        <button type="button" class="btn btn-sm" data-action="resend-code-submit">${state.lang==='ar'?'إعادة إرسال الرمز':'Resend code'}</button>
+        <button type="button" class="btn btn-sm" data-action="cancel-verify">${state.lang==='ar'?'رجوع':'Back'}</button>
+      </div>
+    </div>`;
+  }
   const tabs = [
     {key:'login', label: state.lang==='ar'?'تسجيل الدخول':'Sign in'},
     {key:'signup', label: state.lang==='ar'?'إنشاء حساب':'Create account'},
@@ -1915,6 +1930,10 @@ document.addEventListener('click', async (e)=>{
               found = {id:data.id, name:data.name, email:data.email, role:data.role};
               localStorage.setItem('darin_session_token', data.token);
               if(!DB.demoUsers.some(x=>x.id===data.id)) DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
+            } else if(data.error==='EMAIL_NOT_VERIFIED'){
+              state.pendingVerifyEmail = data.email || u;
+              state.loginError = apiErrorText('EMAIL_NOT_VERIFIED');
+              render(); break;
             } else {
               errMsg = apiErrorText(data.error);
             }
@@ -1941,17 +1960,47 @@ document.addEventListener('click', async (e)=>{
         const res = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, email, password:pass})});
         const data = await res.json();
         if(!res.ok){ state.loginError = apiErrorText(data.error); render(); break; }
-        localStorage.setItem('darin_session_token', data.token);
-        DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
-        state.currentUser={id:data.id, name:data.name, email:data.email, role:'user'}; state.entered=true; state.page='home'; state.loginError='';
-        audit((state.lang==='ar'?'عضو جديد سجّل: ':'New member signed up: ')+name);
-        render(); showToast(state.lang==='ar'?'تم إنشاء الحساب':'Account created');
+        state.pendingVerifyEmail = data.email;
+        state.loginError = '';
+        render(); showToast(state.lang==='ar'?'تم إرسال رمز التحقق لبريدك':'Verification code sent to your email');
       }catch(e){
         state.loginError = apiErrorText('NETWORK_ERROR');
         render();
       }
       break;
     }
+    case 'verify-email-submit': {
+      const code = document.getElementById('verify-code').value.trim();
+      if(!code){ state.loginError = state.lang==='ar'?'أدخل رمز التحقق':'Enter the verification code'; render(); break; }
+      try{
+        const res = await fetch('/api/verify-email', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:state.pendingVerifyEmail, code})});
+        const data = await res.json();
+        if(!res.ok){ state.loginError = apiErrorText(data.error); render(); break; }
+        localStorage.setItem('darin_session_token', data.token);
+        DB.demoUsers.push({id:data.id, name:data.name, email:data.email, password:'', warnings:0, mute:null, blocked:false});
+        state.currentUser={id:data.id, name:data.name, email:data.email, role:'user'}; state.entered=true; state.page='home'; state.loginError=''; state.pendingVerifyEmail=null;
+        audit((state.lang==='ar'?'عضو جديد سجّل: ':'New member signed up: ')+data.name);
+        render(); showToast(state.lang==='ar'?'تم تفعيل الحساب بنجاح':'Account verified successfully');
+      }catch(e){
+        state.loginError = apiErrorText('NETWORK_ERROR');
+        render();
+      }
+      break;
+    }
+    case 'resend-code-submit': {
+      try{
+        const res = await fetch('/api/resend-code', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:state.pendingVerifyEmail})});
+        const data = await res.json();
+        if(!res.ok){ state.loginError = apiErrorText(data.error); render(); break; }
+        showToast(state.lang==='ar'?'تم إرسال رمز جديد':'A new code was sent');
+      }catch(e){
+        state.loginError = apiErrorText('NETWORK_ERROR'); render();
+      }
+      break;
+    }
+    case 'cancel-verify':
+      state.pendingVerifyEmail = null; state.loginError=''; render(); break;
+
 
     case 'toggle-fav': {
       const list = getFav(); const id=t_.dataset.id;
